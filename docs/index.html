@@ -61,6 +61,10 @@
         <input type="checkbox" id="auto-refresh" class="accent-emerald-600" checked>
         <span>自動</span>
       </label>
+      <label class="flex items-center gap-1 text-sm" id="keep-awake-label" title="防止手機自動熄屏">
+        <input type="checkbox" id="keep-awake" class="accent-emerald-600">
+        <span>常亮</span>
+      </label>
       <div class="flex-1 min-w-[130px] flex items-center gap-1">
         <span class="text-xs text-slate-500">警戒距離</span>
         <input type="range" id="danger-buffer-range" min="0.5" max="20" step="0.5" value="2.0" class="flex-1 accent-red-600">
@@ -141,6 +145,36 @@
       clientId = 'client_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
       localStorage.setItem('rtdbClientId', clientId);
     }
+
+    // ── Wake Lock (screen always-on) ────────────────────────────
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => {
+          wakeLock = null;
+          // Re-acquire if still enabled and tab is visible
+          if (document.getElementById('keep-awake')?.checked && document.visibilityState === 'visible') {
+            requestWakeLock();
+          }
+        });
+      } catch (e) {
+        console.warn('Wake lock failed:', e.message);
+      }
+    }
+
+    function releaseWakeLock() {
+      wakeLock?.release().catch(() => {});
+      wakeLock = null;
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && document.getElementById('keep-awake')?.checked) {
+        requestWakeLock();
+      }
+    });
 
     // ── Alarm audio ─────────────────────────────────────────────
     function getAudioCtx() {
@@ -529,6 +563,15 @@
 
       document.getElementById('line-select')?.addEventListener('change', e => {
         if (e.target.value) { window.currentSelectedLine = e.target.value; triggerUpdate(true); }
+      });
+
+      const keepAwakeCb = document.getElementById('keep-awake');
+      if (!('wakeLock' in navigator)) {
+        // Hide if unsupported
+        document.getElementById('keep-awake-label')?.style.setProperty('display', 'none');
+      }
+      keepAwakeCb?.addEventListener('change', () => {
+        keepAwakeCb.checked ? requestWakeLock() : releaseWakeLock();
       });
 
       document.getElementById('btn-alarm-toggle')?.addEventListener('click', () => {
