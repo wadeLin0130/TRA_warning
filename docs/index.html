@@ -131,11 +131,15 @@
     let mapExpanded = false;
 
     // ── Alarm state ──────────────────────────────────────────────
-    let alarmEnabled = true;
-    let alarmActive  = false;
-    let alarmTrainIds = new Set();
-    let alarmTimer   = null;
-    let audioCtx     = null;
+    let alarmEnabled     = true;
+    let alarmActive      = false;
+    let alarmTrainIds    = new Set();
+    let dismissedTrainIds = new Set(); // trains manually silenced; re-arms when train leaves zone
+    let alarmTimer       = null;
+    let audioCtx         = null;
+    let alarmOsc         = null; // main siren oscillator
+    let alarmLFO         = null; // frequency sweep LFO
+    let alarmGain        = null; // master gain (set to 0 to stop)
 
     window.currentMileages = {};
     window.currentSelectedLine = null;
@@ -182,43 +186,68 @@
       return audioCtx;
     }
 
-    function _playBeepCycle() {
-      if (!alarmActive) return;
+    function _startAlarmSound() {
       const ctx = getAudioCtx();
       if (ctx.state === 'suspended') ctx.resume();
-      [[0, 880], [0.3, 660]].forEach(([offset, freq]) => {
-        const osc  = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'square';
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, ctx.currentTime + offset);
-        gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + offset + 0.025);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.22);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(ctx.currentTime + offset);
-        osc.stop(ctx.currentTime + offset + 0.24);
-      });
-      // Android vibration (no-op on iOS)
-      if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
-      setTimeout(_playBeepCycle, 1500);
+
+      alarmGain = ctx.createGain();
+      alarmGain.gain.setValueAtTime(0, ctx.currentTime);
+      alarmGain.gain.linearRampToValueAtTime(0.32, ctx.currentTime + 0.15);
+      alarmGain.connect(ctx.destination);
+
+      // Siren: sawtooth swept 440↔840 Hz by LFO at 0.9 Hz
+      alarmOsc = ctx.createOscillator();
+      alarmOsc.type = 'sawtooth';
+      alarmOsc.frequency.value = 640;
+
+      alarmLFO = ctx.createOscillator();
+      alarmLFO.type = 'sine';
+      alarmLFO.frequency.value = 0.9;
+
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 200;
+
+      alarmLFO.connect(lfoGain);
+      lfoGain.connect(alarmOsc.frequency);
+      alarmOsc.connect(alarmGain);
+
+      alarmLFO.start();
+      alarmOsc.start();
+
+      // Android vibration pattern for 30 s (no-op on iOS)
+      if (navigator.vibrate) navigator.vibrate(Array(25).fill([400, 250]).flat());
+    }
+
+    function _stopAlarmSound() {
+      if (alarmGain && audioCtx) {
+        alarmGain.gain.setValueAtTime(alarmGain.gain.value, audioCtx.currentTime);
+        alarmGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+      }
+      setTimeout(() => {
+        try { alarmOsc?.stop(); } catch(e) {}
+        try { alarmLFO?.stop(); } catch(e) {}
+        alarmOsc = alarmLFO = alarmGain = null;
+      }, 120);
+      if (navigator.vibrate) navigator.vibrate(0);
     }
 
     function startAlarm(trainIds) {
       alarmTrainIds = new Set(trainIds);
       if (alarmActive) return;
       alarmActive = true;
-      _playBeepCycle();
+      _startAlarmSound();
       clearTimeout(alarmTimer);
       alarmTimer = setTimeout(stopAlarm, 30000);
     }
 
     function stopAlarm() {
+      // Remember which trains were silenced so we don't re-trigger while they stay in zone
+      alarmTrainIds.forEach(id => dismissedTrainIds.add(id));
       alarmActive = false;
       alarmTrainIds.clear();
       clearTimeout(alarmTimer);
       alarmTimer = null;
-      if (navigator.vibrate) navigator.vibrate(0);
+      _stopAlarmSound();
       document.querySelectorAll('.alarm-dismiss-btn').forEach(el => el.remove());
     }
 
@@ -271,9 +300,14 @@
         );
         const hasInZone = inZoneTrains.length > 0;
 
-        // Alarm trigger (before renderTrainCards so alarmTrainIds is set)
-        if (alarmEnabled && hasInZone && !alarmActive) {
-          startAlarm(inZoneTrains.map(t => t.train_no));
+        // Clear dismissed memory for trains that left the zone (so they re-arm next time)
+        const currentZoneIds = new Set(inZoneTrains.map(t => t.train_no));
+        dismissedTrainIds.forEach(id => { if (!currentZoneIds.has(id)) dismissedTrainIds.delete(id); });
+
+        // Alarm trigger — skip trains user already silenced this visit
+        const newInZone = inZoneTrains.filter(t => !dismissedTrainIds.has(t.train_no));
+        if (alarmEnabled && newInZone.length > 0 && !alarmActive) {
+          startAlarm(newInZone.map(t => t.train_no));
         } else if (!hasInZone && alarmActive) {
           stopAlarm();
         }
