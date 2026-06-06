@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+logs/
+tra-trainwarning-firebase-adminsdk-fbsvc-8a3ec14a06.json

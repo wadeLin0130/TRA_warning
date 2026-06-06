@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+gunicorn
+httpx
+pydantic
+python-dotenv
+jinja2
+python-multipart
+slowapi
+firebase-admin
+requests
+# for geo calc
+haversine
+# shapely  # optional upgrade for more accurate projection (uncomment + pip if desired)
