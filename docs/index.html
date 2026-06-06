@@ -24,6 +24,11 @@
       0%   { transform: translate(0px, 0); }
       100% { transform: translate(3.5px, 0); }
     }
+    @keyframes alarm-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,.6); }
+      50%       { box-shadow: 0 0 0 10px rgba(220,38,38,0); }
+    }
+    .alarm-btn-active { animation: alarm-pulse 700ms infinite; }
   </style>
 </head>
 <body class="bg-slate-100 text-slate-900">
@@ -91,8 +96,15 @@
       </div>
       <div id="map" class="w-full border border-slate-300 rounded-2xl transition-[height] duration-150" style="height: 150px;"></div>
     </div>
-    <div class="h-3"></div>
+    <div class="h-16"></div>
   </div>
+
+  <!-- 喇叭/靜音按鈕（固定於右下角） -->
+  <button id="btn-alarm-toggle"
+    class="fixed bottom-5 right-4 z-50 w-13 h-13 rounded-full bg-emerald-600 text-2xl shadow-lg flex items-center justify-center border-2 border-white active:scale-90 transition select-none"
+    style="width:52px;height:52px" title="警報音效">
+    🔊
+  </button>
 
   <script>
     // ── Firebase config ──────────────────────────────────────────
@@ -114,6 +126,13 @@
     let rtdbResultsRef = null;
     let mapExpanded = false;
 
+    // ── Alarm state ──────────────────────────────────────────────
+    let alarmEnabled = true;
+    let alarmActive  = false;
+    let alarmTrainIds = new Set();
+    let alarmTimer   = null;
+    let audioCtx     = null;
+
     window.currentMileages = {};
     window.currentSelectedLine = null;
 
@@ -121,6 +140,52 @@
     if (!clientId) {
       clientId = 'client_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
       localStorage.setItem('rtdbClientId', clientId);
+    }
+
+    // ── Alarm audio ─────────────────────────────────────────────
+    function getAudioCtx() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+
+    function _playBeepCycle() {
+      if (!alarmActive) return;
+      const ctx = getAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      [[0, 880], [0.3, 660]].forEach(([offset, freq]) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, ctx.currentTime + offset);
+        gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + offset + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.22);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + offset);
+        osc.stop(ctx.currentTime + offset + 0.24);
+      });
+      // Android vibration (no-op on iOS)
+      if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+      setTimeout(_playBeepCycle, 1500);
+    }
+
+    function startAlarm(trainIds) {
+      alarmTrainIds = new Set(trainIds);
+      if (alarmActive) return;
+      alarmActive = true;
+      _playBeepCycle();
+      clearTimeout(alarmTimer);
+      alarmTimer = setTimeout(stopAlarm, 30000);
+    }
+
+    function stopAlarm() {
+      alarmActive = false;
+      alarmTrainIds.clear();
+      clearTimeout(alarmTimer);
+      alarmTimer = null;
+      if (navigator.vibrate) navigator.vibrate(0);
+      document.querySelectorAll('.alarm-dismiss-btn').forEach(el => el.remove());
     }
 
     // ── Firebase ─────────────────────────────────────────────────
@@ -162,14 +227,28 @@
         if (dirs.length >= 2) {
           if (lowTitleEl) lowTitleEl.textContent = dirs[0].label || '往低端方向';
           if (highTitleEl) highTitleEl.textContent = dirs[1].label || '往高端方向';
-          if (northEl) northEl.innerHTML = renderTrainCards(dirs[0].trains || [], 'blue', dangerIds);
-          if (southEl) southEl.innerHTML = renderTrainCards(dirs[1].trains || [], 'orange', dangerIds);
         }
 
         updateDangerOnMap(data);
         updateTrainMarkersOnMap(data);
 
-        const hasInZone = dirs.some(d => (d.trains || []).some(t => dangerIds.includes(t.current_station_id)));
+        const inZoneTrains = dirs.flatMap(d =>
+          (d.trains || []).filter(t => dangerIds.includes(t.current_station_id))
+        );
+        const hasInZone = inZoneTrains.length > 0;
+
+        // Alarm trigger (before renderTrainCards so alarmTrainIds is set)
+        if (alarmEnabled && hasInZone && !alarmActive) {
+          startAlarm(inZoneTrains.map(t => t.train_no));
+        } else if (!hasInZone && alarmActive) {
+          stopAlarm();
+        }
+
+        if (dirs.length >= 2) {
+          if (northEl) northEl.innerHTML = renderTrainCards(dirs[0].trains || [], 'blue', dangerIds);
+          if (southEl) southEl.innerHTML = renderTrainCards(dirs[1].trains || [], 'orange', dangerIds);
+        }
+
         const alertEl = document.getElementById('danger-alert');
         if (alertEl) {
           if (hasInZone) { alertEl.classList.remove('hidden'); alertEl.classList.add('danger-blink'); }
@@ -354,6 +433,10 @@
         const etaColor = urgent ? 'text-red-700' : `text-${color}-700`;
         const isInDanger = dangerIds.includes(t.current_station_id);
         const dangerNote = isInDanger ? `<div class="mt-1 text-xs font-bold text-red-700">目前列車已在警戒車站範圍，請注意安全。</div>` : '';
+        const showDismiss = alarmActive && alarmEnabled && alarmTrainIds.has(t.train_no);
+        const dismissBtn = showDismiss
+          ? `<button class="alarm-dismiss-btn alarm-btn-active mt-1.5 w-full py-1.5 text-xs font-bold bg-red-600 text-white rounded-lg" onclick="stopAlarm()">🔕 關閉警報</button>`
+          : '';
         return `
           <div class="border ${bg} rounded-xl p-2.5">
             <div class="flex justify-between items-start">
@@ -363,7 +446,7 @@
             <div class="mt-0.5 text-xs text-slate-600">
               目前 ${t.current_mile_km??'-'} km${t.delay_min ? ` · 延誤 ${t.delay_min} 分` : ''}
             </div>
-            ${dangerNote}
+            ${dangerNote}${dismissBtn}
           </div>`;
       }).join('');
     }
@@ -446,6 +529,20 @@
 
       document.getElementById('line-select')?.addEventListener('change', e => {
         if (e.target.value) { window.currentSelectedLine = e.target.value; triggerUpdate(true); }
+      });
+
+      document.getElementById('btn-alarm-toggle')?.addEventListener('click', () => {
+        alarmEnabled = !alarmEnabled;
+        const btn = document.getElementById('btn-alarm-toggle');
+        if (!alarmEnabled) {
+          stopAlarm();
+          btn.textContent = '🔇';
+          btn.style.backgroundColor = '#94a3b8';
+        } else {
+          btn.textContent = '🔊';
+          btn.style.backgroundColor = '';
+          btn.classList.remove('bg-slate-400');
+        }
       });
 
       const mapExpandBtn = document.getElementById('btn-map-expand');
