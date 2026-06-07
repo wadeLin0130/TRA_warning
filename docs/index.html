@@ -7,6 +7,7 @@
   <link rel="manifest" href="./manifest.json">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="./icon.svg">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -35,6 +36,28 @@
   <div class="max-w-[420px] mx-auto bg-white min-h-screen shadow-sm">
     <input id="lat" type="hidden" value="">
     <input id="lon" type="hidden" value="">
+
+    <!-- iOS install guide (shown only on iOS Safari, not yet installed) -->
+    <div id="ios-install-guide" class="hidden mx-2 mt-2 bg-sky-50 border border-sky-300 rounded-xl px-3 py-2.5 text-xs text-sky-900">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <div class="font-bold mb-1">📲 安裝為 App（加入主畫面）</div>
+          <div>1. 點 Safari 下方 <span class="font-bold">分享</span> 🔗 圖示</div>
+          <div>2. 選擇「<span class="font-bold">加入主畫面</span>」</div>
+          <div>3. 點右上角「<span class="font-bold">新增</span>」完成</div>
+        </div>
+        <button onclick="document.getElementById('ios-install-guide').remove(); localStorage.setItem('iosGuideDismissed','1')"
+          class="shrink-0 text-sky-400 text-lg leading-none px-1">✕</button>
+      </div>
+    </div>
+
+    <!-- Android/desktop install button (shown when beforeinstallprompt fires) -->
+    <div id="install-bar" class="hidden mx-2 mt-2">
+      <button id="btn-install"
+        class="w-full py-2.5 font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-xl flex items-center justify-center gap-2 shadow text-sm">
+        📲 安裝為 App（加入主畫面）
+      </button>
+    </div>
 
     <div class="mx-2 mt-2 bg-amber-50 border border-amber-300 rounded-xl px-3 py-2 text-xs text-amber-800 text-center font-medium">
       本工具僅警示時刻表載客列車，路線上工作仍請注意瞭望
@@ -632,10 +655,49 @@
       });
     }
 
+    // ── PWA install prompt ───────────────────────────────────────
+    let deferredInstallPrompt = null;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                      || window.navigator.standalone === true;
+
+    if (!isStandalone) {
+      // Android / desktop Chrome — capture install prompt
+      window.addEventListener('beforeinstallprompt', e => {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        document.getElementById('install-bar')?.classList.remove('hidden');
+      });
+
+      window.addEventListener('appinstalled', () => {
+        document.getElementById('install-bar')?.classList.add('hidden');
+        deferredInstallPrompt = null;
+      });
+
+      document.getElementById('btn-install')?.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        if (outcome === 'accepted') document.getElementById('install-bar')?.classList.add('hidden');
+        deferredInstallPrompt = null;
+      });
+
+      // iOS Safari — show guide if not dismissed before
+      const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isIOS && isSafari && !localStorage.getItem('iosGuideDismissed')) {
+        document.getElementById('ios-install-guide')?.classList.remove('hidden');
+      }
+    }
+
     // ── Bootstrap ────────────────────────────────────────────────
     async function bootstrap() {
       initMap();
       bindEvents();
+
+      // Register service worker for offline cache + install prompt
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW:', e));
+      }
 
       // Pre-load geo data in background so first GPS click is fast
       getGeoIndex('./data').catch(e => console.warn('geo preload:', e));
