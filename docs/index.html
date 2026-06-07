@@ -535,7 +535,7 @@
               <div class="text-3xl font-black tabular-nums ${etaColor}">${eta} <span class="font-black">分</span></div>
             </div>
             <div class="mt-0.5 text-xs text-slate-600">
-              目前 ${t.current_mile_km??'-'} km${t.delay_min ? ` · 延誤 ${t.delay_min} 分` : ''}
+              ${t.between_stations ? `目前在 ${t.between_stations} 區間` : `目前 ${t.current_mile_km??'-'} km`}${t.delay_min ? ` · 延誤 ${t.delay_min} 分` : ''}
             </div>
             ${dangerNote}${dismissBtn}
           </div>`;

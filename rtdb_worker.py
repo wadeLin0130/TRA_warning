@@ -113,6 +113,21 @@ async def compute_upcoming(line_id: str, mileage: float, buffer_km: float, geo, 
     now_min = datetime.now().hour * 60 + datetime.now().minute
     danger_set = set(danger_ids)
 
+    # Station list sorted by mileage — used to find which interval a train is in
+    eff_stas_sorted = sorted(
+        geo.station_of_lines.get(effective_line, []),
+        key=lambda s: float(s.get("CumulativeDistance") or 0)
+    )
+
+    def _sname(s):
+        if not s:
+            return None
+        sid = s.get("StationID")
+        if sid and sid in geo.stations:
+            return geo.stations[sid].get("StationName")
+        n = s.get("StationName") or {}
+        return n.get("Zh_tw") if isinstance(n, dict) else (n or sid)
+
     # First pass: filter by line + rough ETA
     candidates = []
     for lb in boards:
@@ -304,11 +319,24 @@ async def compute_upcoming(line_id: str, mileage: float, buffer_km: float, geo, 
             else f"列車目前在{high_end_name}側，往{low_end_name}方向通過"
         )
 
+        # Find which two stations the train is currently between
+        _before = _after = None
+        for _s in eff_stas_sorted:
+            _cd = float(_s.get("CumulativeDistance") or 0)
+            if _cd <= curr_mile:
+                _before = _s
+            else:
+                _after = _s
+                break
+        _bn, _an = _sname(_before), _sname(_after)
+        between_stations = f"{_bn}－{_an}" if _bn and _an else (_bn or _an)
+
         item = {
             "train_no": train_no,
             "train_type": ttype_name or lb.get("TrainTypeID"),
             "current_station_id": curr_sid,
             "current_mile_km": round(curr_mile, 2) if curr_mile else None,
+            "between_stations": between_stations,
             "direction": c["direction"],
             "direction_hint": direction_hint,
             "delay_min": delay_min,
