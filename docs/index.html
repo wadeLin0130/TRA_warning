@@ -209,14 +209,6 @@
       <span class="text-amber-700 font-bold">注意：</span>本工具僅警示時刻表載客列車，路線上工作仍請注意瞭望
     </div>
 
-    <!-- GPS button -->
-    <div class="px-3 mb-3">
-      <button id="btn-my-loc"
-        class="w-full py-4 text-base font-bold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-2xl flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-900/40">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7" stroke-dasharray="2 2"/></svg>
-        使用我的位置
-      </button>
-    </div>
 
     <!-- Current position + line select -->
     <div class="mx-3 mb-2 surface-card px-4 py-3">
@@ -364,16 +356,17 @@
 
       alarmGain = ctx.createGain();
       alarmGain.gain.setValueAtTime(0, ctx.currentTime);
-      alarmGain.gain.linearRampToValueAtTime(0.32, ctx.currentTime + 0.15);
+      alarmGain.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 0.08);
       alarmGain.connect(ctx.destination);
 
+      // Main siren: sawtooth swept 800↔1200 Hz by LFO at 2.5 Hz (急促)
       alarmOsc = ctx.createOscillator();
       alarmOsc.type = 'sawtooth';
-      alarmOsc.frequency.value = 640;
+      alarmOsc.frequency.value = 1000;
 
       alarmLFO = ctx.createOscillator();
       alarmLFO.type = 'sine';
-      alarmLFO.frequency.value = 0.9;
+      alarmLFO.frequency.value = 2.5;
 
       const lfoGain = ctx.createGain();
       lfoGain.gain.value = 200;
@@ -382,10 +375,27 @@
       lfoGain.connect(alarmOsc.frequency);
       alarmOsc.connect(alarmGain);
 
+      // Second harmonic layer: square wave one octave up for extra harshness
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'square';
+      osc2.frequency.value = 2000;
+      const lfoGain2 = ctx.createGain();
+      lfoGain2.gain.value = 200;
+      alarmLFO.connect(lfoGain2);
+      lfoGain2.connect(osc2.frequency);
+      const gain2 = ctx.createGain();
+      gain2.gain.value = 0.2;
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start();
+      // store osc2 on alarmOsc for cleanup
+      alarmOsc._osc2 = osc2;
+      alarmOsc._gain2 = gain2;
+
       alarmLFO.start();
       alarmOsc.start();
 
-      if (navigator.vibrate) navigator.vibrate(Array(25).fill([400, 250]).flat());
+      if (navigator.vibrate) navigator.vibrate(Array(30).fill([300, 150]).flat());
     }
 
     function _stopAlarmSound() {
@@ -394,6 +404,7 @@
         alarmGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
       }
       setTimeout(() => {
+        try { alarmOsc?._osc2?.stop(); } catch(e) {}
         try { alarmOsc?.stop(); } catch(e) {}
         try { alarmLFO?.stop(); } catch(e) {}
         alarmOsc = alarmLFO = alarmGain = null;
@@ -690,23 +701,31 @@
       }).join('');
     }
 
+    // ── Auto location ────────────────────────────────────────────
+    function requestLocation() {
+      if (!navigator.geolocation) {
+        document.getElementById('current-pos').innerHTML = '<div class="text-xs text-red-400">瀏覽器不支援定位</div>';
+        return;
+      }
+      document.getElementById('current-pos').innerHTML = '<div class="text-xs text-slate-400">定位中...</div>';
+      navigator.geolocation.getCurrentPosition(pos => {
+        document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
+        document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
+        setUserMarker(pos.coords.latitude, pos.coords.longitude);
+        detectPosition();
+      }, err => {
+        document.getElementById('current-pos').innerHTML = `<div class="text-xs text-red-400">定位失敗：${err.message}</div>`;
+      }, { enableHighAccuracy: true, timeout: 10000 });
+    }
+
     // ── Events ───────────────────────────────────────────────────
     function bindEvents() {
-      document.getElementById('btn-my-loc')?.addEventListener('click', () => {
-        if (!navigator.geolocation) { alert('瀏覽器不支援定位'); return; }
-        navigator.geolocation.getCurrentPosition(pos => {
-          document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
-          document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
-          setUserMarker(pos.coords.latitude, pos.coords.longitude);
-          detectPosition();
-        }, err => alert('定位失敗：' + err.message), { enableHighAccuracy: true, timeout: 10000 });
-      });
 
       document.getElementById('btn-refresh')?.addEventListener('click', () => {
         const lat = parseFloat(document.getElementById('lat').value);
         const lon = parseFloat(document.getElementById('lon').value);
         if (lat && lon) triggerUpdate(true);
-        else detectPosition();
+        else requestLocation();
       });
 
       document.getElementById('btn-clear')?.addEventListener('click', () => {
@@ -732,14 +751,7 @@
 
       function startAutoRefresh() {
         stopAutoRefresh();
-        autoInterval = setInterval(() => {
-          if (!navigator.geolocation) return;
-          navigator.geolocation.getCurrentPosition(pos => {
-            document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
-            document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
-            detectPosition();
-          }, () => {}, { enableHighAccuracy: true, timeout: 8000 });
-        }, 10000);
+        autoInterval = setInterval(requestLocation, 10000);
       }
       function stopAutoRefresh() {
         if (autoInterval) { clearInterval(autoInterval); autoInterval = null; }
@@ -826,6 +838,9 @@
       }
 
       getGeoIndex('./data').catch(e => console.warn('geo preload:', e));
+
+      // Auto-request location on load
+      requestLocation();
 
       if (document.getElementById('auto-refresh')?.checked) {
         window.startAutoRefresh();
