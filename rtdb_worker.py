@@ -43,7 +43,7 @@ def init_firebase():
     print("[worker] Firebase initialized.")
 
 
-async def compute_upcoming(line_id: str, mileage: float, buffer_km: float, geo, tdx, live_boards: list) -> dict:
+async def compute_upcoming(line_id: str, mileage: float, geo, tdx, live_boards: list) -> dict:
     """
     Compute approaching trains for a given line + mileage.
     live_boards is pre-fetched for the cycle (shared across all positions).
@@ -51,7 +51,7 @@ async def compute_upcoming(line_id: str, mileage: float, buffer_km: float, geo, 
     """
     effective_line = geo.shape_to_sol.get(line_id, line_id)
     danger_ids, danger_names, danger_stations = geo.get_danger_zone_stations(
-        effective_line, mileage, num_before=2, num_after=2, buffer_km=buffer_km
+        effective_line, mileage, num_before=2, num_after=2
     )
 
     # Deduplicate live boards by TrainNo (keep higher DelayTime)
@@ -366,7 +366,6 @@ async def compute_upcoming(line_id: str, mileage: float, buffer_km: float, geo, 
             "station_ids": danger_ids,
             "station_names": danger_names,
             "stations": danger_stations,
-            "buffer_km": buffer_km,
         },
         "directions": [
             {"key": "low",  "label": f"往{low_end_name}方向",  "end_name": low_end_name,  "trains": toward_low[:2]},
@@ -411,11 +410,10 @@ async def main():
                 for client_id, position in watched.items():
                     line_id = position.get("line_id")
                     mileage = position.get("mileage")
-                    buffer  = float(position.get("buffer_km") or 2.0)
                     if not line_id or mileage is None:
                         continue
                     try:
-                        result = await compute_upcoming(line_id, float(mileage), buffer, geo, tdx, live_boards)
+                        result = await compute_upcoming(line_id, float(mileage), geo, tdx, live_boards)
                         payload = {
                             **result,
                             "client_id": client_id,
