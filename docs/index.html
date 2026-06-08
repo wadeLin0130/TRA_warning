@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="apple-touch-icon" href="./icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -15,122 +18,280 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
   <script src="./geo.js"></script>
   <style>
-    #map { height: 150px; border-radius: 12px; }
-    #danger-alert.danger-blink { animation: blink-red 600ms infinite; }
-    @keyframes blink-red {
-      0%, 100% { background-color: #b91c1c; }
-      50% { background-color: #dc2626; box-shadow: 0 0 0 12px rgba(220,38,38,.4); }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Outfit', 'Noto Sans TC', system-ui, sans-serif;
+      background: #f0f4f8;
+      color: #1e293b;
+      -webkit-font-smoothing: antialiased;
     }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
+    /* ── Map ── */
+    #map {
+      height: 160px;
+      border-radius: 14px;
+    }
+    .leaflet-container { background: #e2e8f0; }
+
+    /* ── Danger alert ── */
+    #danger-alert.danger-blink {
+      animation: blink-red 700ms infinite;
+    }
+    @keyframes blink-red {
+      0%, 100% { background: #fee2e2; box-shadow: 0 0 0 0 rgba(239,68,68,.3); }
+      50% { background: #fecaca; box-shadow: 0 0 0 16px rgba(239,68,68,.0); }
+    }
+
+    /* ── Train marker arrow ── */
     @keyframes arrow-bob {
       0%   { transform: translate(0px, 0); }
       100% { transform: translate(3.5px, 0); }
     }
+
+    /* ── Alarm button pulse ── */
     @keyframes alarm-pulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,.6); }
-      50%       { box-shadow: 0 0 0 10px rgba(220,38,38,0); }
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.6); }
+      50%       { box-shadow: 0 0 0 12px rgba(239,68,68,.0); }
     }
     .alarm-btn-active { animation: alarm-pulse 700ms infinite; }
+
+    /* ── Smooth transitions ── */
+    button { transition: all 150ms ease; }
+    button:active { transform: scale(0.97); }
+
+    /* ── Select styling ── */
+    select {
+      background: #ffffff;
+      color: #1e293b;
+      border-color: #cbd5e1;
+      outline: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 6px center;
+      background-size: 14px;
+      padding-right: 24px;
+    }
+    select:focus { border-color: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,.2); }
+
+    /* ── Input styling ── */
+    input[type=number] {
+      background: #ffffff;
+      color: #1e293b;
+      border-color: #cbd5e1;
+    }
+    input[type=range] { accent-color: #ef4444; }
+    input[type=checkbox] { accent-color: #10b981; width: 16px; height: 16px; cursor: pointer; }
+
+    /* ── ETA number ── */
+    .eta-num {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum";
+      letter-spacing: -1px;
+    }
+
+    /* ── Train card ── */
+    .train-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .train-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: currentColor;
+      border-radius: 3px 0 0 3px;
+    }
+    .train-card.blue-accent::before { background: #3b82f6; }
+    .train-card.orange-accent::before { background: #f97316; }
+    .train-card.danger-card { background: #fff5f5; border-color: #fca5a5; }
+    .train-card.danger-card::before { background: #ef4444; }
+
+    /* ── Direction panel ── */
+    .dir-panel {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 14px 12px 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.05);
+    }
+    .dir-panel.panel-blue { border-top: 2px solid #3b82f6; }
+    .dir-panel.panel-orange { border-top: 2px solid #f97316; }
+
+    /* ── Surface card ── */
+    .surface-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    }
+
+    /* ── Install bar ── */
+    .install-btn {
+      background: linear-gradient(135deg, #0369a1, #0ea5e9);
+    }
+    .install-btn:hover { filter: brightness(1.1); }
+
+    /* ── Map expand transition ── */
+    #map { transition: height 200ms ease; }
+
+    /* ── Alarm FAB ── */
+    #btn-alarm-toggle {
+      background: #10b981;
+      border: 2px solid rgba(255,255,255,.4);
+      box-shadow: 0 4px 16px rgba(16,185,129,.35);
+    }
+    #btn-alarm-toggle:hover { filter: brightness(1.1); }
+
+    /* ── Warning banner ── */
+    .warning-banner {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-left: 3px solid #d97706;
+    }
   </style>
 </head>
-<body class="bg-slate-100 text-slate-900">
-  <div class="max-w-[420px] mx-auto bg-white min-h-screen shadow-sm">
+<body>
+  <div class="max-w-[430px] mx-auto min-h-screen pb-20">
     <input id="lat" type="hidden" value="">
     <input id="lon" type="hidden" value="">
 
-    <!-- iOS install guide (shown only on iOS Safari, not yet installed) -->
-    <div id="ios-install-guide" class="hidden mx-2 mt-2 bg-sky-50 border border-sky-300 rounded-xl px-3 py-2.5 text-xs text-sky-900">
-      <div class="flex items-start justify-between gap-2">
-        <div>
-          <div class="font-bold mb-1">📲 安裝為 App（加入主畫面）</div>
-          <div>1. 點 Safari 下方 <span class="font-bold">分享</span> 🔗 圖示</div>
-          <div>2. 選擇「<span class="font-bold">加入主畫面</span>」</div>
-          <div>3. 點右上角「<span class="font-bold">新增</span>」完成</div>
-        </div>
-        <button onclick="document.getElementById('ios-install-guide').remove(); localStorage.setItem('iosGuideDismissed','1')"
-          class="shrink-0 text-sky-400 text-lg leading-none px-1">✕</button>
+    <!-- Top bar -->
+    <div class="px-3 pt-4 pb-2 flex items-center justify-between">
+      <div>
+        <div class="text-xs font-semibold tracking-widest uppercase text-emerald-600 leading-none mb-0.5">TRA Monitor</div>
+        <div class="text-base font-bold text-slate-800 leading-none">列車監視輔助</div>
+      </div>
+      <div class="text-[10px] text-slate-400 text-right leading-tight">
+        <div>即時列車</div>
+        <div>安全警示</div>
       </div>
     </div>
 
-    <!-- Android/desktop install button (shown when beforeinstallprompt fires) -->
-    <div id="install-bar" class="hidden mx-2 mt-2">
+    <!-- iOS install guide -->
+    <div id="ios-install-guide" class="hidden mx-3 mb-2">
+      <div class="surface-card px-3 py-2.5 text-xs text-slate-500">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <div class="font-semibold text-slate-700 mb-1">安裝為 App（加入主畫面）</div>
+            <div>1. 點 Safari 下方 <span class="text-slate-700">分享</span> 圖示</div>
+            <div>2. 選擇「<span class="text-slate-700">加入主畫面</span>」</div>
+            <div>3. 點右上角「<span class="text-slate-700">新增</span>」完成</div>
+          </div>
+          <button onclick="document.getElementById('ios-install-guide').remove(); localStorage.setItem('iosGuideDismissed','1')"
+            class="shrink-0 text-slate-400 hover:text-slate-600 text-base leading-none px-1 py-0.5">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Android/desktop install button -->
+    <div id="install-bar" class="hidden mx-3 mb-2">
       <button id="btn-install"
-        class="w-full py-2.5 font-bold bg-sky-600 hover:bg-sky-700 text-white rounded-xl flex items-center justify-center gap-2 shadow text-sm">
-        📲 安裝為 App（加入主畫面）
+        class="install-btn w-full py-3 font-semibold text-white rounded-2xl flex items-center justify-center gap-2 text-sm">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        安裝為 App（加入主畫面）
       </button>
     </div>
 
-    <div class="mx-2 mt-2 bg-amber-50 border border-amber-300 rounded-xl px-3 py-2 text-xs text-amber-800 text-center font-medium">
-      本工具僅警示時刻表載客列車，路線上工作仍請注意瞭望
+    <!-- Warning notice -->
+    <div class="mx-3 mb-3 warning-banner rounded-xl px-3 py-2 text-xs text-amber-800 font-medium">
+      <span class="text-amber-700 font-bold">注意：</span>本工具僅警示時刻表載客列車，路線上工作仍請注意瞭望
     </div>
 
-    <div class="p-2">
+    <!-- GPS button -->
+    <div class="px-3 mb-3">
       <button id="btn-my-loc"
-              class="w-full py-3.5 text-lg font-extrabold bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-2xl transition flex items-center justify-center gap-2 shadow">
-        📍 使用我的位置
+        class="w-full py-4 text-base font-bold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-2xl flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-900/40">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7" stroke-dasharray="2 2"/></svg>
+        使用我的位置
       </button>
     </div>
 
-    <div class="mx-2 bg-slate-50 border border-slate-200 rounded-2xl p-3">
-      <div id="current-pos" class="text-emerald-700">尚未偵測位置</div>
-      <div class="mt-1 flex items-center gap-2">
-        <select id="line-select" class="text-xs border rounded px-1 py-0.5 bg-white flex-1"></select>
-        <button id="btn-refresh" class="px-2.5 py-1 text-xs font-medium bg-emerald-600 text-white rounded-lg active:scale-[0.985]">更新</button>
-        <button id="btn-clear" class="px-2.5 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg active:bg-slate-100">清除</button>
+    <!-- Current position + line select -->
+    <div class="mx-3 mb-2 surface-card px-4 py-3">
+      <div id="current-pos" class="text-emerald-700 text-sm font-medium mb-2">尚未偵測位置</div>
+      <div class="flex items-center gap-2">
+        <select id="line-select" class="text-xs border rounded-lg px-2 py-1.5 flex-1 font-medium"></select>
+        <button id="btn-refresh" class="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg whitespace-nowrap">更新</button>
+        <button id="btn-clear" class="px-3 py-1.5 text-xs font-medium border border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 rounded-lg whitespace-nowrap">清除</button>
       </div>
     </div>
 
-    <div class="mx-2 mt-2 bg-white border border-slate-200 rounded-2xl p-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-      <label class="flex items-center gap-1 text-sm">
-        <input type="checkbox" id="auto-refresh" class="accent-emerald-600" checked>
-        <span>自動</span>
-      </label>
-      <label class="flex items-center gap-1 text-sm" id="keep-awake-label" title="防止手機自動熄屏">
-        <input type="checkbox" id="keep-awake" class="accent-emerald-600">
-        <span>常亮</span>
-      </label>
-      <div class="flex-1 min-w-[130px] flex items-center gap-1">
-        <span class="text-xs text-slate-500">警戒距離</span>
-        <input type="range" id="danger-buffer-range" min="0.5" max="20" step="0.5" value="2.0" class="flex-1 accent-red-600">
-        <input id="danger-buffer" type="number" value="2.0" min="0.5" max="20" step="0.5" class="w-8 border rounded px-0.5 py-0 text-xs font-mono text-center">
-        <span class="text-xs text-slate-500">km</span>
+    <!-- Settings row -->
+    <div class="mx-3 mb-2 surface-card px-4 py-3">
+      <div class="flex items-center gap-4 mb-2.5">
+        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+          <input type="checkbox" id="auto-refresh" checked>
+          <span>自動更新</span>
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none" id="keep-awake-label" title="防止手機自動熄屏">
+          <input type="checkbox" id="keep-awake">
+          <span>常亮</span>
+        </label>
       </div>
-    </div>
-
-    <div id="danger-alert" class="hidden mx-2 mt-2 bg-red-600 text-white text-center py-2.5 px-3 rounded-2xl font-extrabold text-base shadow-lg border-2 border-red-700 danger-blink">
-      ⚠️ 警戒區間有列車接近！ 立即注意
-    </div>
-
-    <div class="mx-2 mt-2">
-      <div id="trains-loading" class="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-center text-slate-400 text-sm">
-        載入中...
-      </div>
-      <div id="trains-panels" class="hidden">
-        <div class="bg-blue-50 border border-blue-200 rounded-2xl p-2 mb-2">
-          <div id="dir-low-title" class="font-extrabold text-blue-900 text-xl mb-1"></div>
-          <div id="north-trains" class="space-y-1.5 min-h-[70px]"></div>
-        </div>
-        <div class="bg-orange-50 border border-orange-200 rounded-2xl p-2">
-          <div id="dir-high-title" class="font-extrabold text-orange-900 text-xl mb-1"></div>
-          <div id="south-trains" class="space-y-1.5 min-h-[70px]"></div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-400 whitespace-nowrap shrink-0">警戒距離</span>
+        <input type="range" id="danger-buffer-range" min="0.5" max="20" step="0.5" value="2.0" class="flex-1 min-w-0">
+        <div class="flex items-center gap-1 shrink-0">
+          <input id="danger-buffer" type="number" value="2.0" min="0.5" max="20" step="0.5"
+            class="w-10 border rounded-md px-0.5 py-0 text-xs font-mono text-center">
+          <span class="text-xs text-slate-400">km</span>
         </div>
       </div>
     </div>
 
-    <div class="mx-2 mt-3">
-      <div class="flex items-center justify-between mb-1 px-0.5">
-        <span class="text-xs text-slate-500">地圖（點擊地圖可設定位置）</span>
-        <button id="btn-map-expand" class="px-2 py-0.5 text-xs font-medium border border-slate-300 rounded-lg bg-white active:bg-slate-100">放大</button>
-      </div>
-      <div id="map" class="w-full border border-slate-300 rounded-2xl transition-[height] duration-150" style="height: 150px;"></div>
+    <!-- Danger alert -->
+    <div id="danger-alert" class="hidden mx-3 mb-2 rounded-2xl px-4 py-3 font-bold text-base text-red-800 border-2 border-red-300 text-center">
+      <div class="text-xl font-black tracking-wide mb-0.5">⚠ 警戒區間有列車接近</div>
+      <div class="text-sm font-medium text-red-600">立即注意瞭望 — 保持安全距離</div>
     </div>
-    <div class="h-16"></div>
+
+    <!-- Train panels -->
+    <div class="mx-3 mb-3">
+      <div id="trains-loading" class="surface-card p-6 text-center text-slate-400 text-sm">
+        <div class="text-slate-300 text-2xl mb-2">⬡</div>
+        等待定位...
+      </div>
+      <div id="trains-panels" class="hidden space-y-2">
+        <div class="dir-panel panel-blue">
+          <div id="dir-low-title" class="font-extrabold text-blue-700 text-lg mb-2 tracking-tight"></div>
+          <div id="north-trains" class="space-y-2 min-h-[60px]"></div>
+        </div>
+        <div class="dir-panel panel-orange">
+          <div id="dir-high-title" class="font-extrabold text-orange-600 text-lg mb-2 tracking-tight"></div>
+          <div id="south-trains" class="space-y-2 min-h-[60px]"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div class="mx-3 mb-3">
+      <div class="flex items-center justify-between mb-2 px-0.5">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">地圖 <span class="normal-case font-normal text-slate-400">— 點擊可設定位置</span></span>
+        <button id="btn-map-expand" class="px-2.5 py-1 text-xs font-medium border border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 rounded-lg bg-white">放大</button>
+      </div>
+      <div id="map" class="w-full border border-slate-200 rounded-2xl" style="height: 160px;"></div>
+    </div>
   </div>
 
-  <!-- 喇叭/靜音按鈕（固定於右下角） -->
+  <!-- Alarm FAB -->
   <button id="btn-alarm-toggle"
-    class="fixed bottom-5 right-4 z-50 w-13 h-13 rounded-full bg-emerald-600 text-2xl shadow-lg flex items-center justify-center border-2 border-white active:scale-90 transition select-none"
+    class="fixed bottom-5 right-4 z-50 rounded-full text-xl flex items-center justify-center select-none"
     style="width:52px;height:52px" title="警報音效">
-    🔊
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" class="text-white">
+      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+    </svg>
   </button>
 
   <script>
@@ -157,12 +318,12 @@
     let alarmEnabled     = true;
     let alarmActive      = false;
     let alarmTrainIds    = new Set();
-    let dismissedTrainIds = new Set(); // trains manually silenced; re-arms when train leaves zone
+    let dismissedTrainIds = new Set();
     let alarmTimer       = null;
     let audioCtx         = null;
-    let alarmOsc         = null; // main siren oscillator
-    let alarmLFO         = null; // frequency sweep LFO
-    let alarmGain        = null; // master gain (set to 0 to stop)
+    let alarmOsc         = null;
+    let alarmLFO         = null;
+    let alarmGain        = null;
 
     window.currentMileages = {};
     window.currentSelectedLine = null;
@@ -173,7 +334,7 @@
       localStorage.setItem('rtdbClientId', clientId);
     }
 
-    // ── Wake Lock (screen always-on) ────────────────────────────
+    // ── Wake Lock ────────────────────────────────────────────────
     let wakeLock = null;
 
     async function requestWakeLock() {
@@ -182,7 +343,6 @@
         wakeLock = await navigator.wakeLock.request('screen');
         wakeLock.addEventListener('release', () => {
           wakeLock = null;
-          // Re-acquire if still enabled and tab is visible
           if (document.getElementById('keep-awake')?.checked && document.visibilityState === 'visible') {
             requestWakeLock();
           }
@@ -203,7 +363,7 @@
       }
     });
 
-    // ── Alarm audio ─────────────────────────────────────────────
+    // ── Alarm audio ──────────────────────────────────────────────
     function getAudioCtx() {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       return audioCtx;
@@ -218,7 +378,6 @@
       alarmGain.gain.linearRampToValueAtTime(0.32, ctx.currentTime + 0.15);
       alarmGain.connect(ctx.destination);
 
-      // Siren: sawtooth swept 440↔840 Hz by LFO at 0.9 Hz
       alarmOsc = ctx.createOscillator();
       alarmOsc.type = 'sawtooth';
       alarmOsc.frequency.value = 640;
@@ -237,7 +396,6 @@
       alarmLFO.start();
       alarmOsc.start();
 
-      // Android vibration pattern for 30 s (no-op on iOS)
       if (navigator.vibrate) navigator.vibrate(Array(25).fill([400, 250]).flat());
     }
 
@@ -264,7 +422,6 @@
     }
 
     function stopAlarm() {
-      // Remember which trains were silenced so we don't re-trigger while they stay in zone
       alarmTrainIds.forEach(id => dismissedTrainIds.add(id));
       alarmActive = false;
       alarmTrainIds.clear();
@@ -296,7 +453,7 @@
       });
     }
 
-    // ── Render from RTDB result (same shape as /api/upcoming) ────
+    // ── Render from RTDB result ──────────────────────────────────
     function renderFromData(data) {
       const dangerIds = data.danger_zone?.station_ids || [];
       const dirs = data.directions || [];
@@ -323,11 +480,9 @@
         );
         const hasInZone = inZoneTrains.length > 0;
 
-        // Clear dismissed memory for trains that left the zone (so they re-arm next time)
         const currentZoneIds = new Set(inZoneTrains.map(t => t.train_no));
         dismissedTrainIds.forEach(id => { if (!currentZoneIds.has(id)) dismissedTrainIds.delete(id); });
 
-        // Alarm trigger — skip trains user already silenced this visit
         const newInZone = inZoneTrains.filter(t => !dismissedTrainIds.has(t.train_no));
         if (alarmEnabled && newInZone.length > 0 && !alarmActive) {
           startAlarm(newInZone.map(t => t.train_no));
@@ -354,26 +509,24 @@
       const lon = parseFloat(document.getElementById('lon').value);
       if (!lat || !lon) { alert('請先取得 GPS 位置'); return; }
 
-      document.getElementById('current-pos').innerHTML = '<div class="text-xs text-slate-500">計算中...</div>';
+      document.getElementById('current-pos').innerHTML = '<div class="text-xs text-slate-400">計算中...</div>';
       setUserMarker(lat, lon);
 
       try {
         const geo = await getGeoIndex('./data');
         const res = geo.findClosest(lat, lon);
         if (!res) {
-          document.getElementById('current-pos').innerHTML = '<div class="text-xs text-red-500">附近找不到台鐵線路</div>';
+          document.getElementById('current-pos').innerHTML = '<div class="text-xs text-red-400">附近找不到台鐵線路</div>';
           return;
         }
 
-        const km = res.mileageKm, kInt = Math.floor(km);
         document.getElementById('current-pos').innerHTML = `
-          <div class="text-xs text-emerald-600">${res.lineName}</div>
-          <div class="font-mono text-3xl font-black text-emerald-700 tracking-[-1px] leading-none">${res.mileageK}</div>
+          <div class="text-xs font-medium text-emerald-600 mb-0.5">${res.lineName}</div>
+          <div class="font-mono text-4xl font-black text-emerald-700 leading-none eta-num">${res.mileageK}</div>
         `;
 
         if (res.projectionLat) showProjection(res.projectionLat, res.projectionLon, res.lineName);
 
-        // Nearby lines for junction select
         const lineSel = document.getElementById('line-select');
         if (lineSel) {
           lineSel.innerHTML = '';
@@ -397,7 +550,7 @@
         subscribeToResults();
 
       } catch (e) {
-        document.getElementById('current-pos').innerHTML = `<div class="text-xs text-red-500">計算失敗：${e.message}</div>`;
+        document.getElementById('current-pos').innerHTML = `<div class="text-xs text-red-400">計算失敗：${e.message}</div>`;
       }
     }
 
@@ -434,7 +587,7 @@
       userMarker = L.marker([lat, lon], {
         icon: L.divIcon({
           className: 'user-loc',
-          html: '<div style="background:#0ea5e9;width:14px;height:14px;border-radius:9999px;border:2px solid white;box-shadow:0 0 0 3px rgba(14,165,233,.3)"></div>',
+          html: '<div style="background:#10b981;width:14px;height:14px;border-radius:9999px;border:2px solid white;box-shadow:0 0 0 4px rgba(16,185,129,.3)"></div>',
           iconSize: [14,14], iconAnchor: [7,7]
         })
       }).addTo(map).bindPopup('目前位置');
@@ -457,12 +610,12 @@
       stations.forEach(s => {
         if (s.lat && s.lon) {
           pts.push([s.lat, s.lon]);
-          L.circleMarker([s.lat, s.lon], { color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.45, radius: 7, weight: 2 })
+          L.circleMarker([s.lat, s.lon], { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.45, radius: 7, weight: 2 })
             .addTo(dangerLayer).bindPopup(`警戒站: ${s.name}`);
         }
       });
       if (pts.length >= 2) {
-        L.polyline(pts, { color: '#dc2626', weight: 7, opacity: 0.35, dashArray: '6,3' }).addTo(dangerLayer);
+        L.polyline(pts, { color: '#ef4444', weight: 7, opacity: 0.35, dashArray: '6,3' }).addTo(dangerLayer);
       }
     }
 
@@ -516,26 +669,35 @@
     }
 
     function renderTrainCards(trains, color, dangerIds = []) {
-      if (!trains.length) return `<div class="text-sm italic text-${color}-600">目前此方向無即將通過列車</div>`;
+      if (!trains.length) {
+        return `<div class="text-sm text-slate-400 italic py-1">目前此方向無即將通過列車</div>`;
+      }
       return trains.map(t => {
         const eta = t.est_eta_min ?? '?';
-        const urgent = eta < 5;
-        const bg = urgent ? 'bg-red-100 border-red-400' : `bg-white border-${color}-200`;
-        const etaColor = urgent ? 'text-red-700' : `text-${color}-700`;
+        const urgent = typeof eta === 'number' && eta < 5;
         const isInDanger = dangerIds.includes(t.current_station_id);
-        const dangerNote = isInDanger ? `<div class="mt-1 text-xs font-bold text-red-700">目前列車已在警戒車站範圍，請注意安全。</div>` : '';
+        const accentClass = isInDanger || urgent ? 'danger-card' : (color === 'blue' ? 'blue-accent' : 'orange-accent');
+        const etaColor = urgent || isInDanger ? 'text-red-600' : (color === 'blue' ? 'text-blue-600' : 'text-orange-600');
+        const dangerNote = isInDanger
+          ? `<div class="mt-1.5 text-xs font-semibold text-red-600 flex items-center gap-1"><span>▲</span> 列車已在警戒車站範圍內</div>`
+          : '';
         const showDismiss = alarmActive && alarmEnabled && alarmTrainIds.has(t.train_no);
         const dismissBtn = showDismiss
-          ? `<button class="alarm-dismiss-btn alarm-btn-active mt-1.5 w-full py-1.5 text-xs font-bold bg-red-600 text-white rounded-lg" onclick="stopAlarm()">🔕 關閉警報</button>`
+          ? `<button class="alarm-dismiss-btn alarm-btn-active mt-2 w-full py-2 text-xs font-bold bg-red-600 hover:bg-red-500 text-white rounded-lg" onclick="stopAlarm()">關閉警報</button>`
           : '';
         return `
-          <div class="border ${bg} rounded-xl p-2.5">
-            <div class="flex justify-between items-start">
-              <div class="font-mono text-sm font-bold">${t.train_no} <span class="text-base font-normal">${t.train_type||''}</span></div>
-              <div class="text-3xl font-black tabular-nums ${etaColor}">${eta} <span class="font-black">分</span></div>
-            </div>
-            <div class="mt-0.5 text-xs text-slate-600">
-              ${t.between_stations ? `目前在 ${t.between_stations} 區間` : `目前 ${t.current_mile_km??'-'} km`}${t.delay_min ? ` · 延誤 ${t.delay_min} 分` : ''}
+          <div class="train-card ${accentClass}">
+            <div class="flex justify-between items-start gap-2">
+              <div class="flex-1 min-w-0">
+                <div class="font-mono text-sm font-bold text-slate-700">${t.train_no} <span class="font-normal text-slate-500">${t.train_type||''}</span></div>
+                <div class="mt-1 text-xs text-slate-400 leading-snug">
+                  ${t.between_stations ? `${t.between_stations} 區間` : `${t.current_mile_km??'-'} km`}${t.delay_min ? ` · 延誤 ${t.delay_min} 分` : ''}
+                </div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="eta-num text-4xl font-black leading-none ${etaColor}">${eta}</div>
+                <div class="text-xs text-slate-400 font-medium mt-0.5">分鐘</div>
+              </div>
             </div>
             ${dangerNote}${dismissBtn}
           </div>`;
@@ -624,7 +786,6 @@
 
       const keepAwakeCb = document.getElementById('keep-awake');
       if (!('wakeLock' in navigator)) {
-        // Hide if unsupported
         document.getElementById('keep-awake-label')?.style.setProperty('display', 'none');
       }
       keepAwakeCb?.addEventListener('change', () => {
@@ -636,12 +797,11 @@
         const btn = document.getElementById('btn-alarm-toggle');
         if (!alarmEnabled) {
           stopAlarm();
-          btn.textContent = '🔇';
-          btn.style.backgroundColor = '#94a3b8';
+          btn.style.background = '#475569';
+          btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" class="text-white"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`;
         } else {
-          btn.textContent = '🔊';
-          btn.style.backgroundColor = '';
-          btn.classList.remove('bg-slate-400');
+          btn.style.background = '#10b981';
+          btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" class="text-white"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`;
         }
       });
 
@@ -649,7 +809,7 @@
       const mapEl = document.getElementById('map');
       mapExpandBtn?.addEventListener('click', () => {
         mapExpanded = !mapExpanded;
-        mapEl.style.height = mapExpanded ? '360px' : '150px';
+        mapEl.style.height = mapExpanded ? '360px' : '160px';
         mapExpandBtn.textContent = mapExpanded ? '縮小' : '放大';
         setTimeout(() => map?.invalidateSize(), 60);
       });
@@ -661,7 +821,6 @@
                       || window.navigator.standalone === true;
 
     if (!isStandalone) {
-      // Android / desktop Chrome — capture install prompt
       window.addEventListener('beforeinstallprompt', e => {
         e.preventDefault();
         deferredInstallPrompt = e;
@@ -681,7 +840,6 @@
         deferredInstallPrompt = null;
       });
 
-      // iOS Safari — show guide if not dismissed before
       const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
       const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
       if (isIOS && isSafari && !localStorage.getItem('iosGuideDismissed')) {
@@ -694,15 +852,12 @@
       initMap();
       bindEvents();
 
-      // Register service worker for offline cache + install prompt
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW:', e));
       }
 
-      // Pre-load geo data in background so first GPS click is fast
       getGeoIndex('./data').catch(e => console.warn('geo preload:', e));
 
-      // Start auto-refresh if checked (default on)
       if (document.getElementById('auto-refresh')?.checked) {
         window.startAutoRefresh();
       }

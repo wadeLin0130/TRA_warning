@@ -1,4 +1,4 @@
-const CACHE = 'tra-v1';
+const CACHE = 'tra-v2';
 const SHELL = [
   './',
   './index.html',
