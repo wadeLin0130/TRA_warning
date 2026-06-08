@@ -504,6 +504,11 @@
 
     // ── Geo & position detection ─────────────────────────────────
     async function detectPosition() {
+      // Clear previously-dismissed train IDs every time the user (re-)locates.
+      // Without this, trains dismissed during a prior alarm stay in dismissedTrainIds
+      // across the session, so a train already in the new zone is silently skipped.
+      dismissedTrainIds.clear();
+
       const lat = parseFloat(document.getElementById('lat').value);
       const lon = parseFloat(document.getElementById('lon').value);
       if (!lat || !lon) { alert('請先取得 GPS 位置'); return; }
@@ -838,6 +843,22 @@
       }
 
       getGeoIndex('./data').catch(e => console.warn('geo preload:', e));
+
+      // Pre-unlock AudioContext on first user gesture (click / touchstart).
+      // Web Audio API requires a gesture before audio can play; the alarm often fires
+      // from a Firebase async callback (not a gesture) so the context stays suspended.
+      // Attaching this listener early means the FIRST tap on any element — GPS button,
+      // alarm toggle, map, etc. — will unlock audio so the next alarm fires with sound.
+      function _unlockAudio() {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+      }
+      document.addEventListener('touchstart', _unlockAudio, { once: true, passive: true });
+      document.addEventListener('click',      _unlockAudio, { once: true, passive: true });
 
       // Auto-request location on load
       requestLocation();
