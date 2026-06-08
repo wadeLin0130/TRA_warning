@@ -44,9 +44,12 @@ STATIC_DIR = BASE_DIR / "static"
 TEMPLATES_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
 
-# Simple in-memory cache for live board to reduce TDX quota usage (user ~5 req/s)
-# TTL ~8s to allow auto 5s + some manual calls without hitting 429
-_live_board_cache = {"data": None, "ts": 0, "ttl": 8}
+# In-memory cache for live board.
+# TTL 20 s: auto-refresh interval is 10 s, so every user hits the cache on normal cadence.
+# _live_board_lock prevents a "cache stampede" where multiple concurrent requests all see
+# an expired cache and each fire a TDX call simultaneously (burst → 429).
+_live_board_cache = {"data": None, "ts": 0, "ttl": 20}
+_live_board_lock = asyncio.Lock()
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -155,12 +158,18 @@ async def get_upcoming(request: Request,
     if _live_board_cache["data"] is not None and (now - _live_board_cache["ts"]) < _live_board_cache["ttl"]:
         live_boards = _live_board_cache["data"]
     else:
-        try:
-            live_boards = await _tdx.get_train_live_board(top=800)
-            _live_board_cache["data"] = live_boards
-            _live_board_cache["ts"] = now
-        except Exception as e:
-            raise HTTPException(502, f"TDX live fetch failed: {e}")
+        # Lock prevents cache stampede: only one coroutine fetches; others wait then reuse result.
+        async with _live_board_lock:
+            now = time.time()  # re-check after acquiring lock
+            if _live_board_cache["data"] is not None and (now - _live_board_cache["ts"]) < _live_board_cache["ttl"]:
+                live_boards = _live_board_cache["data"]
+            else:
+                try:
+                    live_boards = await _tdx.get_train_live_board(top=800)
+                    _live_board_cache["data"] = live_boards
+                    _live_board_cache["ts"] = now
+                except Exception as e:
+                    raise HTTPException(502, f"TDX live fetch failed: {e}")
 
     # TDX occasionally returns duplicate entries for the same TrainNo (same station, same
     # UpdateTime, but different DelayTime values). Keep the entry with the higher DelayTime

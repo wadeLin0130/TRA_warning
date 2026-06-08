@@ -504,11 +504,6 @@
 
     // ── Geo & position detection ─────────────────────────────────
     async function detectPosition() {
-      // Clear previously-dismissed train IDs every time the user (re-)locates.
-      // Without this, trains dismissed during a prior alarm stay in dismissedTrainIds
-      // across the session, so a train already in the new zone is silently skipped.
-      dismissedTrainIds.clear();
-
       const lat = parseFloat(document.getElementById('lat').value);
       const lon = parseFloat(document.getElementById('lon').value);
       if (!lat || !lon) { alert('請先取得 GPS 位置'); return; }
