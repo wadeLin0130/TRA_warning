@@ -229,26 +229,16 @@
     </div>
 
     <!-- Settings row -->
-    <div class="mx-3 mb-2 surface-card px-4 py-3">
-      <div class="flex items-center gap-4 mb-2.5">
-        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
-          <input type="checkbox" id="auto-refresh" checked>
-          <span>自動更新</span>
-        </label>
-        <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none" id="keep-awake-label" title="防止手機自動熄屏">
-          <input type="checkbox" id="keep-awake">
-          <span>常亮</span>
-        </label>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="text-xs text-slate-400 whitespace-nowrap shrink-0">警戒距離</span>
-        <input type="range" id="danger-buffer-range" min="0.5" max="20" step="0.5" value="2.0" class="flex-1 min-w-0">
-        <div class="flex items-center gap-1 shrink-0">
-          <input id="danger-buffer" type="number" value="2.0" min="0.5" max="20" step="0.5"
-            class="w-10 border rounded-md px-0.5 py-0 text-xs font-mono text-center">
-          <span class="text-xs text-slate-400">km</span>
-        </div>
-      </div>
+    <div class="mx-3 mb-2 surface-card px-4 py-3 flex items-center gap-4">
+      <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+        <input type="checkbox" id="auto-refresh" checked>
+        <span>自動更新</span>
+      </label>
+      <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none" id="keep-awake-label" title="防止手機自動熄屏">
+        <input type="checkbox" id="keep-awake">
+        <span>常亮</span>
+      </label>
+      <span class="text-xs text-slate-400 ml-auto">警戒：前後各 2 車站</span>
     </div>
 
     <!-- Danger alert -->
@@ -310,7 +300,6 @@
     let map, userMarker, projMarker, trackLayerGroup, dangerLayer;
     let trainMarkers = [];
     let autoInterval = null;
-    let bufferUpdateTimer = null;
     let rtdbResultsRef = null;
     let mapExpanded = false;
 
@@ -435,10 +424,9 @@
     firebase.initializeApp(firebaseConfig);
     const fbdb = firebase.database();
 
-    function writePositionToRtdb(lat, lon, lineId, mileage, bufferKm) {
+    function writePositionToRtdb(lat, lon, lineId, mileage) {
       fbdb.ref(`watched_positions/${clientId}`).set({
         lat, lon, line_id: lineId, mileage,
-        buffer_km: bufferKm || 2.0,
         updated_at: new Date().toISOString(),
       });
     }
@@ -545,8 +533,7 @@
           window.currentSelectedLine = res.lineId;
         }
 
-        const buf = parseFloat(document.getElementById('danger-buffer')?.value) || 2.0;
-        writePositionToRtdb(lat, lon, res.lineId, res.mileageKm, buf);
+        writePositionToRtdb(lat, lon, res.lineId, res.mileageKm);
         subscribeToResults();
 
       } catch (e) {
@@ -560,8 +547,7 @@
       const sel = window.currentSelectedLine;
       const mile = sel ? window.currentMileages[sel] : null;
       if (sel && mile != null) {
-        const buf = parseFloat(document.getElementById('danger-buffer')?.value) || 2.0;
-        writePositionToRtdb(lat, lon, sel, mile, buf);
+        writePositionToRtdb(lat, lon, sel, mile);
       } else if (lat && lon) {
         detectPosition();
       }
@@ -743,15 +729,6 @@
       });
 
       const autoCb = document.getElementById('auto-refresh');
-      const bufRange = document.getElementById('danger-buffer-range');
-      const bufNum = document.getElementById('danger-buffer');
-
-      function syncBuffer(val) {
-        const v = Math.max(0.5, Math.min(20, parseFloat(val) || 2.0));
-        if (bufRange) bufRange.value = v;
-        if (bufNum) bufNum.value = v;
-        return v;
-      }
 
       function startAutoRefresh() {
         stopAutoRefresh();
@@ -771,14 +748,6 @@
       window.stopAutoRefresh = stopAutoRefresh;
 
       autoCb?.addEventListener('change', () => autoCb.checked ? startAutoRefresh() : stopAutoRefresh());
-
-      bufRange?.addEventListener('input', () => {
-        const v = syncBuffer(bufRange.value);
-        clearTimeout(bufferUpdateTimer);
-        bufferUpdateTimer = setTimeout(() => triggerUpdate(false), 220);
-      });
-      bufRange?.addEventListener('change', () => { syncBuffer(bufRange.value); triggerUpdate(false); });
-      bufNum?.addEventListener('change', () => { syncBuffer(bufNum.value); triggerUpdate(false); });
 
       document.getElementById('line-select')?.addEventListener('change', e => {
         if (e.target.value) { window.currentSelectedLine = e.target.value; triggerUpdate(true); }
