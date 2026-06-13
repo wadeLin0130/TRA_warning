@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>列車監視輔助小工具</title>
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Outfit', 'Noto Sans TC', system-ui, sans-serif;
+      background: #f0f4f8;
+      color: #1e293b;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
+    #map { height: 160px; border-radius: 14px; transition: height 200ms ease; }
+    .leaflet-container { background: #e2e8f0; }
+
+    #danger-alert.danger-blink { animation: blink-red 700ms infinite; }
+    @keyframes blink-red {
+      0%, 100% { background: #fee2e2; box-shadow: 0 0 0 0 rgba(239,68,68,.3); }
+      50%       { background: #fecaca; box-shadow: 0 0 0 16px rgba(239,68,68,.0); }
+    }
+
+    @keyframes arrow-bob {
+      0%   { transform: translate(0px, 0); }
+      100% { transform: translate(3.5px, 0); }
+    }
+
+    @keyframes alarm-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.6); }
+      50%       { box-shadow: 0 0 0 12px rgba(239,68,68,.0); }
+    }
+    .alarm-btn-active { animation: alarm-pulse 700ms infinite; }
+
+    button { transition: all 150ms ease; }
+    button:active { transform: scale(0.97); }
+
+    select {
+      background: #fff; color: #1e293b; border-color: #cbd5e1;
+      outline: none; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 6px center; background-size: 14px; padding-right: 24px;
+    }
+    select:focus { border-color: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,.2); }
+
+    input[type=number] { background: #fff; color: #1e293b; border-color: #cbd5e1; }
+    input[type=range]  { accent-color: #ef4444; }
+    input[type=checkbox] { accent-color: #10b981; width: 16px; height: 16px; cursor: pointer; }
+
+    .eta-num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; letter-spacing: -1px; }
+
+    .train-card {
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      padding: 12px 14px; position: relative; overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .train-card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 3px; background: currentColor; border-radius: 3px 0 0 3px;
+    }
+    .train-card.blue-accent::before   { background: #3b82f6; }
+    .train-card.orange-accent::before { background: #f97316; }
+    .train-card.danger-card { background: #fff5f5; border-color: #fca5a5; }
+    .train-card.danger-card::before { background: #ef4444; }
+
+    .dir-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 14px 12px 12px; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+    .dir-panel.panel-blue   { border-top: 2px solid #3b82f6; }
+    .dir-panel.panel-orange { border-top: 2px solid #f97316; }
+
+    .surface-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+
+    .warning-banner { background: #fffbeb; border: 1px solid #fcd34d; border-left: 3px solid #d97706; }
+
+    #btn-alarm-toggle {
+      background: #10b981; border: 2px solid rgba(255,255,255,.4);
+      box-shadow: 0 4px 16px rgba(16,185,129,.35);
+    }
+    #btn-alarm-toggle:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body>
+  <div class="max-w-[430px] mx-auto min-h-screen pb-20">
+    <input id="lat" type="hidden" value="">
+    <input id="lon" type="hidden" value="">
+
+    <!-- Top bar -->
+    <div class="px-3 pt-4 pb-2 flex items-center justify-between">
+      <div>
+        <div class="text-xs font-semibold tracking-widest uppercase text-emerald-600 leading-none mb-0.5">TRA Monitor</div>
+        <div class="text-base font-bold text-slate-800 leading-none">列車監視輔助</div>
+      </div>
+      <button id="btn-my-loc"
+        class="px-4 py-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl shadow flex items-center gap-1.5">
+        📍 定位
+      </button>
+    </div>
+
+    <!-- Warning notice -->
+    <div class="mx-3 mb-3 warning-banner rounded-xl px-3 py-2 text-xs text-amber-800 font-medium">
+      <span class="text-amber-700 font-bold">注意：</span>本工具僅警示時刻表載客列車，路線上工作仍請注意瞭望
+    </div>
+
+    <!-- Current position + line select -->
+    <div class="mx-3 mb-2 surface-card px-4 py-3">
+      <div id="current-pos" class="text-emerald-700 text-sm font-medium mb-2">尚未偵測位置</div>
+      <div class="flex items-center gap-2">
+        <select id="line-select" class="text-xs border rounded-lg px-2 py-1.5 flex-1 font-medium"></select>
+        <button id="btn-refresh" class="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg whitespace-nowrap">更新</button>
+        <button id="btn-clear"   class="px-3 py-1.5 text-xs font-medium border border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 rounded-lg whitespace-nowrap">清除</button>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="mx-3 mb-2 surface-card px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+      <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+        <input type="checkbox" id="auto-refresh" checked>
+        <span>自動更新</span>
+      </label>
+      <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none" id="keep-awake-label" title="防止手機自動熄屏">
+        <input type="checkbox" id="keep-awake">
+        <span>常亮</span>
+      </label>
+      <div class="flex items-center gap-1.5 ml-auto">
+        <span class="text-xs text-slate-500">警戒</span>
+        <input type="range" id="danger-buffer-range" min="0.5" max="20" step="0.5" value="2.0" class="w-20">
+        <input id="danger-buffer" type="number" value="2.0" min="0.5" max="20" step="0.5"
+          class="w-9 border rounded px-0.5 py-0 text-xs font-mono text-center">
+        <span class="text-xs text-slate-500">km</span>
+      </div>
+    </div>
+
+    <!-- Danger alert -->
+    <div id="danger-alert" class="hidden mx-3 mb-2 rounded-2xl px-4 py-3 font-bold text-base text-red-800 border-2 border-red-300 text-center">
+      <div class="text-xl font-black tracking-wide mb-0.5">⚠ 警戒區間有列車接近</div>
+      <div class="text-sm font-medium text-red-600">立即注意瞭望 — 保持安全距離</div>
+    </div>
+
+    <!-- Train panels -->
+    <div class="mx-3 mb-3">
+      <div id="trains-loading" class="surface-card p-6 text-center text-slate-400 text-sm">
+        <div class="text-slate-300 text-2xl mb-2">⬡</div>
+        等待定位...
+      </div>
+      <div id="trains-panels" class="hidden space-y-2">
+        <div class="dir-panel panel-blue">
+          <div id="dir-low-title"  class="font-extrabold text-blue-700 text-lg mb-2 tracking-tight"></div>
+          <div id="north-trains"   class="space-y-2 min-h-[60px]"></div>
+        </div>
+        <div class="dir-panel panel-orange">
+          <div id="dir-high-title" class="font-extrabold text-orange-600 text-lg mb-2 tracking-tight"></div>
+          <div id="south-trains"   class="space-y-2 min-h-[60px]"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div class="mx-3 mb-3">
+      <div class="flex items-center justify-between mb-2 px-0.5">
+        <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">地圖 <span class="normal-case font-normal text-slate-400">— 點擊可設定位置</span></span>
+        <button id="btn-map-expand" class="px-2.5 py-1 text-xs font-medium border border-slate-300 text-slate-500 hover:text-slate-700 hover:border-slate-400 rounded-lg bg-white">放大</button>
+      </div>
+      <div id="map" class="w-full border border-slate-200 rounded-2xl" style="height: 160px;"></div>
+    </div>
+  </div>
+
+  <!-- Alarm FAB -->
+  <button id="btn-alarm-toggle"
+    class="fixed bottom-5 right-4 z-50 rounded-full text-xl flex items-center justify-center select-none"
+    style="width:52px;height:52px" title="警報音效">
+    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" class="text-white">
+      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+    </svg>
+  </button>
+
+  <script>
+    // ── State ────────────────────────────────────────────────────
+    let map, userMarker, projMarker, trackLayerGroup, dangerLayer;
+    let trainMarkers = [];
+    let autoInterval = null;
+    let bufferUpdateTimer = null;
+    let mapExpanded = false;
+    let consecutiveFetchFailures = 0;
+    window.currentMileages = {};
+    window.currentSelectedLine = null;
+
+    // ── Alarm state ──────────────────────────────────────────────
+    let alarmEnabled     = true;
+    let alarmActive      = false;
+    let alarmTrainIds    = new Set();
+    let dismissedTrainIds = new Set();
+    let alarmTimer       = null;
+    let audioCtx         = null;
+    let alarmOsc         = null;
+    let alarmLFO         = null;
+    let alarmGain        = null;
+
+    // ── Wake Lock ────────────────────────────────────────────────
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator)) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => {
+          wakeLock = null;
+          if (document.getElementById('keep-awake')?.checked && document.visibilityState === 'visible') {
+            requestWakeLock();
+          }
+        });
+      } catch (e) {
+        console.warn('Wake lock failed:', e.message);
+      }
+    }
+
+    function releaseWakeLock() {
+      wakeLock?.release().catch(() => {});
+      wakeLock = null;
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && document.getElementById('keep-awake')?.checked) {
+        requestWakeLock();
+      }
+    });
+
+    // ── Alarm audio ──────────────────────────────────────────────
+    function getAudioCtx() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+
+    function _startAlarmSound() {
+      const ctx = getAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      alarmGain = ctx.createGain();
+      alarmGain.gain.setValueAtTime(0, ctx.currentTime);
+      alarmGain.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 0.08);
+      alarmGain.connect(ctx.destination);
+
+      alarmOsc = ctx.createOscillator();
+      alarmOsc.type = 'sawtooth';
+      alarmOsc.frequency.value = 1000;
+
+      alarmLFO = ctx.createOscillator();
+      alarmLFO.type = 'sine';
+      alarmLFO.frequency.value = 2.5;
+
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 200;
+      alarmLFO.connect(lfoGain);
+      lfoGain.connect(alarmOsc.frequency);
+      alarmOsc.connect(alarmGain);
+
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'square';
+      osc2.frequency.value = 2000;
+      const lfoGain2 = ctx.createGain();
+      lfoGain2.gain.value = 200;
+      alarmLFO.connect(lfoGain2);
+      lfoGain2.connect(osc2.frequency);
+      const gain2 = ctx.createGain();
+      gain2.gain.value = 0.2;
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start();
+      alarmOsc._osc2 = osc2;
+      alarmOsc._gain2 = gain2;
+
+      alarmLFO.start();
+      alarmOsc.start();
+
+      if (navigator.vibrate) navigator.vibrate(Array(30).fill([300, 150]).flat());
+    }
+
+    function _stopAlarmSound() {
+      if (alarmGain && audioCtx) {
+        alarmGain.gain.setValueAtTime(alarmGain.gain.value, audioCtx.currentTime);
+        alarmGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+      }
+      setTimeout(() => {
+        try { alarmOsc?._osc2?.stop(); } catch(e) {}
+        try { alarmOsc?.stop();        } catch(e) {}
+        try { alarmLFO?.stop();        } catch(e) {}
+        alarmOsc = alarmLFO = alarmGain = null;
+      }, 120);
+      if (navigator.vibrate) navigator.vibrate(0);
+    }
+
+    function startAlarm(trainIds) {
+      alarmTrainIds = new Set(trainIds);
+      if (alarmActive) return;
+      alarmActive = true;
+      _startAlarmSound();
+      clearTimeout(alarmTimer);
+      alarmTimer = setTimeout(stopAlarm, 30000);
+    }
+
+    function stopAlarm() {
+      alarmTrainIds.forEach(id => dismissedTrainIds.add(id));
+      alarmActive = false;
+      alarmTrainIds.clear();
+      clearTimeout(alarmTimer);
+      alarmTimer = null;
+      _stopAlarmSound();
+      document.querySelectorAll('.alarm-dismiss-btn').forEach(el => el.remove());
+    }
+
+    // ── Map helpers ──────────────────────────────────────────────
+    function initMap() {
+      map = L.map('map', { zoomControl: true }).setView([23.7, 120.9], 8);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OSM contributors'
+      }).addTo(map);
+      trackLayerGroup = L.layerGroup().addTo(map);
+      map.on('click', e => {
+        document.getElementById('lat').value = e.latlng.lat.toFixed(6);
+        document.getElementById('lon').value = e.latlng.lng.toFixed(6);
+        setUserMarker(e.latlng.lat, e.latlng.lng);
+        detectPosition();
+      });
+    }
+
+    function setUserMarker(lat, lon) {
+      if (userMarker) userMarker.remove();
+      userMarker = L.marker([lat, lon], {
+        icon: L.divIcon({
+          className: 'user-loc',
+          html: '<div style="background:#10b981;width:14px;height:14px;border-radius:9999px;border:2px solid white;box-shadow:0 0 0 4px rgba(16,185,129,.3)"></div>',
+          iconSize: [14,14], iconAnchor: [7,7]
+        })
+      }).addTo(map).bindPopup('目前位置');
+      map.panTo([lat, lon]);
+    }
+
+    function showProjection(lat, lon, lineName) {
+      if (projMarker) projMarker.remove();
+      projMarker = L.circleMarker([lat, lon], {
+        radius: 8, color: '#10b981', fillColor: '#10b981', fillOpacity: 0.9, weight: 2
+      }).addTo(map);
+      projMarker.bindPopup(`投影點<br>${lineName}`);
+    }
+
+    function updateDangerOnMap(data) {
+      if (!map) return;
+      if (!dangerLayer) dangerLayer = L.layerGroup().addTo(map);
+      else dangerLayer.clearLayers();
+      const stations = data.danger_zone?.stations || [];
+      if (!stations.length) return;
+      const pts = [];
+      stations.forEach(s => {
+        if (s.lat && s.lon) {
+          pts.push([s.lat, s.lon]);
+          L.circleMarker([s.lat, s.lon], {
+            color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.45, radius: 7, weight: 2
+          }).addTo(dangerLayer).bindPopup(`警戒站: ${s.name}`);
+        }
+      });
+      if (pts.length >= 2) {
+        L.polyline(pts, { color: '#ef4444', weight: 7, opacity: 0.35, dashArray: '6,3' }).addTo(dangerLayer);
+      }
+    }
+
+    function getTrainShortCode(t) {
+      if (!t) return '?';
+      if (t.includes('區間')) return '區'; if (t.includes('莒光')) return '莒';
+      if (t.includes('自強')) return '自'; if (t.includes('普悠瑪')) return '普';
+      if (t.includes('太魯閣')) return '太'; if (t.includes('復興')) return '復';
+      return t.charAt(0) || '?';
+    }
+
+    function updateTrainMarkersOnMap(data) {
+      if (!map) return;
+      trainMarkers.forEach(m => m?.remove());
+      trainMarkers = [];
+      (data.directions || []).forEach((dir, di) => {
+        const color = di === 0 ? '#3b82f6' : '#f97316';
+        (dir.trains || []).forEach(t => {
+          const p = t.current_station_pos;
+          if (!p?.lat || !p?.lon) return;
+          const short = getTrainShortCode(t.train_type);
+          let angle = t.track_angle ?? (di === 0 ? 180 : 0);
+          if (t.track_angle == null && t.next_station_pos?.lat) {
+            const dlat = t.next_station_pos.lat - p.lat, dlon = t.next_station_pos.lon - p.lon;
+            const mlr = ((p.lat + t.next_station_pos.lat) / 2) * Math.PI / 180;
+            angle = Math.atan2(dlon * Math.cos(mlr), dlat) * 180 / Math.PI;
+          }
+          const icon = L.divIcon({
+            html: `<svg width="36" height="36" viewBox="0 0 36 36" style="overflow:visible">
+              <circle cx="18" cy="18" r="9" fill="${color}" stroke="#fff" stroke-width="2"/>
+              <text x="18" y="18" text-anchor="middle" dominant-baseline="middle" fill="#fff" font-size="8" font-weight="700" font-family="sans-serif">${short}</text>
+              <g transform="translate(18,18)"><g transform="rotate(${angle-90})">
+                <g style="animation:arrow-bob 900ms infinite alternate ease-in-out">
+                  <g transform="translate(9.5,0)"><polygon points="0,-3 6,0 0,3" fill="${color}" stroke="#fff" stroke-width="0.8"/></g>
+                </g></g></g>
+            </svg>`,
+            className: '', iconSize: [36,36], iconAnchor: [18,18]
+          });
+          const marker = L.marker([p.lat, p.lon], { icon }).addTo(map)
+            .bindPopup(`<b>${t.train_no} ${t.train_type||''}</b><br>${dir.label}<br>預計 ${t.est_eta_min} 分通過<br>延誤 ${t.delay_min||0} 分`);
+          trainMarkers.push(marker);
+        });
+      });
+    }
+
+    function fitToMonitoring(data) {
+      if (!map || !data) return;
+      const b = L.latLngBounds();
+      const clat = parseFloat(document.getElementById('lat').value);
+      const clon = parseFloat(document.getElementById('lon').value);
+      if (clat && clon) b.extend([clat, clon]);
+      (data.danger_zone?.stations || []).forEach(s => {
+        if (s.lat != null && s.lon != null) b.extend([s.lat, s.lon]);
+      });
+      if (b.isValid()) map.fitBounds(b, { padding: [40, 40], maxZoom: 15 });
+    }
+
+    // ── UI helpers ───────────────────────────────────────────────
+    function withPreservedScroll(fn) {
+      const y = window.scrollY || 0;
+      fn();
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+
+    function renderTrainCards(trains, color, dangerIds = []) {
+      if (!trains.length) {
+        return `<div class="text-sm text-slate-400 italic py-1">目前此方向無即將通過列車</div>`;
+      }
+      return trains.map(t => {
+        const eta = t.est_eta_min ?? '?';
+        const urgent = typeof eta === 'number' && eta < 5;
+        const isInDanger = dangerIds.includes(t.current_station_id);
+        const accentClass = isInDanger || urgent ? 'danger-card' : (color === 'blue' ? 'blue-accent' : 'orange-accent');
+        const etaColor = urgent || isInDanger ? 'text-red-600' : (color === 'blue' ? 'text-blue-600' : 'text-orange-600');
+        const dangerNote = isInDanger
+          ? `<div class="mt-1.5 text-xs font-semibold text-red-600 flex items-center gap-1"><span>▲</span> 列車已在警戒車站範圍內</div>`
+          : '';
+        const showDismiss = alarmActive && alarmEnabled && alarmTrainIds.has(t.train_no);
+        const dismissBtn = showDismiss
+          ? `<button class="alarm-dismiss-btn alarm-btn-active mt-2 w-full py-2 text-xs font-bold bg-red-600 hover:bg-red-500 text-white rounded-lg" onclick="stopAlarm()">關閉警報</button>`
+          : '';
+        return `
+          <div class="train-card ${accentClass}">
+            <div class="flex justify-between items-start gap-2">
+              <div class="flex-1 min-w-0">
+                <div class="font-mono text-sm font-bold text-slate-700">${t.train_no} <span class="font-normal text-slate-500">${t.train_type||''}</span></div>
+                <div class="mt-1 text-xs text-slate-400 leading-snug">
+                  ${t.current_mile_km != null ? t.current_mile_km + ' km' : '-'}${t.delay_min ? ` · 延誤 ${t.delay_min} 分` : ''}
+                </div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="eta-num text-4xl font-black leading-none ${etaColor}">${eta}</div>
+                <div class="text-xs text-slate-400 font-medium mt-0.5">分鐘</div>
+              </div>
+            </div>
+            ${dangerNote}${dismissBtn}
+          </div>`;
+      }).join('');
+    }
+
+    // ── Core data flow ───────────────────────────────────────────
+    async function detectPosition() {
+      const lat = parseFloat(document.getElementById('lat').value);
+      const lon = parseFloat(document.getElementById('lon').value);
+      if (!lat || !lon) { alert('請先取得 GPS 位置'); return; }
+
+      document.getElementById('current-pos').innerHTML = '<div class="text-xs text-slate-400">計算中...</div>';
+      setUserMarker(lat, lon);
+
+      try {
+        const r = await fetch('/api/position', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat, lon })
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+
+        document.getElementById('current-pos').innerHTML = `
+          <div class="text-xs font-medium text-emerald-600 mb-0.5">${data.line_name || data.line_id}</div>
+          <div class="font-mono text-4xl font-black text-emerald-700 leading-none eta-num">${data.mileage_k || (data.mileage_km + ' km')}</div>
+        `;
+
+        if (data.projection) showProjection(data.projection.lat, data.projection.lon, data.line_name);
+
+        const lineSel = document.getElementById('line-select');
+        if (lineSel) {
+          lineSel.innerHTML = '';
+          window.currentMileages = {};
+          const addOpt = (lid, name, mk, mKm) => {
+            const o = document.createElement('option');
+            o.value = lid; o.textContent = `${name} (${mk})`;
+            lineSel.appendChild(o);
+            window.currentMileages[lid] = mKm;
+          };
+          addOpt(data.line_id, data.line_name, data.mileage_k, data.mileage_km);
+          for (const nl of (data.nearby_lines || [])) {
+            const mk = nl.mileage_k || `K${Math.floor(nl.mileage_km)}+${String(Math.round((nl.mileage_km % 1) * 1000)).padStart(3, '0')}`;
+            addOpt(nl.line_id, nl.line_name, mk + ' 附近', nl.mileage_km);
+          }
+          lineSel.value = data.line_id;
+          window.currentSelectedLine = data.line_id;
+        }
+
+        await fetchAndRenderWarning(lat, lon, { fitMap: true });
+      } catch (e) {
+        document.getElementById('current-pos').innerHTML = `<div class="text-xs text-red-400">計算失敗：${e.message}</div>`;
+      }
+    }
+
+    async function fetchAndRenderWarning(lat = null, lon = null, options = {}) {
+      const { fitMap = false, silent = false } = options || {};
+      const northEl     = document.getElementById('north-trains');
+      const southEl     = document.getElementById('south-trains');
+      const lowTitleEl  = document.getElementById('dir-low-title');
+      const highTitleEl = document.getElementById('dir-high-title');
+
+      if (!silent) {
+        northEl.innerHTML = `<div class="text-sm text-blue-400">載入中...</div>`;
+        southEl.innerHTML = `<div class="text-sm text-orange-400">載入中...</div>`;
+      }
+
+      const bufNum = parseFloat(document.getElementById('danger-buffer')?.value) || 2.0;
+      const selLine = window.currentSelectedLine;
+      const mileForSel = selLine && window.currentMileages[selLine] != null ? window.currentMileages[selLine] : null;
+
+      let url = '/api/upcoming';
+      if (selLine && mileForSel != null) {
+        url += `?line_id=${selLine}&mileage=${mileForSel}&danger_buffer_km=${bufNum}`;
+      } else if (lat != null && lon != null) {
+        url += `?lat=${lat}&lon=${lon}&danger_buffer_km=${bufNum}`;
+      } else {
+        const ilat = parseFloat(document.getElementById('lat').value);
+        const ilon = parseFloat(document.getElementById('lon').value);
+        if (ilat && ilon) url += `?lat=${ilat}&lon=${ilon}&danger_buffer_km=${bufNum}`;
+        else {
+          northEl.innerHTML = southEl.innerHTML = `<div class="text-sm text-red-400">請先取得位置</div>`;
+          return;
+        }
+      }
+
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+
+        const dangerIds = data.danger_zone?.station_ids || [];
+        const dirs = data.directions || [];
+
+        document.getElementById('trains-loading')?.classList.add('hidden');
+        document.getElementById('trains-panels')?.classList.remove('hidden');
+
+        // Alarm logic
+        const inZoneTrains = dirs.flatMap(d =>
+          (d.trains || []).filter(t => dangerIds.includes(t.current_station_id))
+        );
+        const hasInZone = inZoneTrains.length > 0;
+        const currentZoneIds = new Set(inZoneTrains.map(t => t.train_no));
+        dismissedTrainIds.forEach(id => { if (!currentZoneIds.has(id)) dismissedTrainIds.delete(id); });
+        const newInZone = inZoneTrains.filter(t => !dismissedTrainIds.has(t.train_no));
+        if (alarmEnabled && newInZone.length > 0 && !alarmActive) {
+          startAlarm(newInZone.map(t => t.train_no));
+        } else if (!hasInZone && alarmActive) {
+          stopAlarm();
+        }
+
+        withPreservedScroll(() => {
+          if (dirs.length >= 2) {
+            if (lowTitleEl)  lowTitleEl.textContent  = dirs[0].label || '往低端方向';
+            if (highTitleEl) highTitleEl.textContent = dirs[1].label || '往高端方向';
+            northEl.innerHTML = renderTrainCards(dirs[0].trains || [], 'blue',   dangerIds);
+            southEl.innerHTML = renderTrainCards(dirs[1].trains || [], 'orange', dangerIds);
+          } else {
+            if (lowTitleEl)  lowTitleEl.textContent  = '往低端方向';
+            if (highTitleEl) highTitleEl.textContent = '往高端方向';
+            northEl.innerHTML = renderTrainCards(data.from_north || [], 'blue',   dangerIds);
+            southEl.innerHTML = renderTrainCards(data.from_south || [], 'orange', dangerIds);
+          }
+
+          const alertEl = document.getElementById('danger-alert');
+          if (alertEl) {
+            if (hasInZone) { alertEl.classList.remove('hidden'); alertEl.classList.add('danger-blink'); }
+            else           { alertEl.classList.add('hidden');    alertEl.classList.remove('danger-blink'); }
+          }
+
+          updateDangerOnMap(data);
+          updateTrainMarkersOnMap(data);
+          if (fitMap) fitToMonitoring(data);
+        });
+
+        consecutiveFetchFailures = 0;
+      } catch (e) {
+        consecutiveFetchFailures++;
+        const msg = `<div class="text-sm text-red-500">更新失敗：${e.message}</div>`;
+        withPreservedScroll(() => {
+          northEl.innerHTML = southEl.innerHTML = msg;
+          const alertEl = document.getElementById('danger-alert');
+          if (alertEl) { alertEl.classList.add('hidden'); alertEl.classList.remove('danger-blink'); }
+        });
+        if (consecutiveFetchFailures >= 3 && autoInterval) {
+          stopAutoRefresh();
+          document.getElementById('auto-refresh').checked = false;
+        }
+      }
+    }
+
+    // ── Location ─────────────────────────────────────────────────
+    function requestLocation() {
+      if (!navigator.geolocation) {
+        document.getElementById('current-pos').innerHTML = '<div class="text-xs text-red-400">瀏覽器不支援定位</div>';
+        return;
+      }
+      document.getElementById('current-pos').innerHTML = '<div class="text-xs text-slate-400">定位中...</div>';
+      navigator.geolocation.getCurrentPosition(pos => {
+        document.getElementById('lat').value = pos.coords.latitude.toFixed(6);
+        document.getElementById('lon').value = pos.coords.longitude.toFixed(6);
+        setUserMarker(pos.coords.latitude, pos.coords.longitude);
+        detectPosition();
+      }, err => {
+        document.getElementById('current-pos').innerHTML = `<div class="text-xs text-red-400">定位失敗：${err.message}</div>`;
+      }, { enableHighAccuracy: true, timeout: 10000 });
+    }
+
+    // ── Auto-refresh ──────────────────────────────────────────────
+    function startAutoRefresh() {
+      stopAutoRefresh();
+      autoInterval = setInterval(() => {
+        const lat = parseFloat(document.getElementById('lat').value);
+        const lon = parseFloat(document.getElementById('lon').value);
+        if (lat && lon) fetchAndRenderWarning(lat, lon, { fitMap: false, silent: true });
+      }, 10000);
+    }
+    function stopAutoRefresh() {
+      if (autoInterval) { clearInterval(autoInterval); autoInterval = null; }
+    }
+    window.startAutoRefresh = startAutoRefresh;
+    window.stopAutoRefresh  = stopAutoRefresh;
+
+    // ── Events ────────────────────────────────────────────────────
+    function bindEvents() {
+      document.getElementById('btn-my-loc')?.addEventListener('click', requestLocation);
+
+      document.getElementById('btn-refresh')?.addEventListener('click', () => {
+        const lat = parseFloat(document.getElementById('lat').value);
+        const lon = parseFloat(document.getElementById('lon').value);
+        if (lat && lon) {
+          fetchAndRenderWarning(lat, lon, { fitMap: true });
+          if (document.getElementById('auto-refresh')?.checked) startAutoRefresh();
+        } else {
+          requestLocation();
+        }
+      });
+
+      document.getElementById('btn-clear')?.addEventListener('click', () => {
+        [userMarker, projMarker].forEach(m => m?.remove());
+        if (dangerLayer) dangerLayer.clearLayers();
+        trainMarkers.forEach(m => m?.remove()); trainMarkers = [];
+        stopAlarm();
+        document.getElementById('current-pos').innerHTML = '已清除';
+        document.getElementById('line-select').innerHTML = '';
+        document.getElementById('north-trains').innerHTML = '';
+        document.getElementById('south-trains').innerHTML = '';
+        document.getElementById('danger-alert')?.classList.add('hidden');
+        document.getElementById('trains-loading')?.classList.remove('hidden');
+        document.getElementById('trains-panels')?.classList.add('hidden');
+        document.getElementById('lat').value = '';
+        document.getElementById('lon').value = '';
+        window.currentMileages = {}; window.currentSelectedLine = null;
+        stopAutoRefresh();
+        document.getElementById('auto-refresh').checked = false;
+      });
+
+      document.getElementById('auto-refresh')?.addEventListener('change', e => {
+        e.target.checked ? startAutoRefresh() : stopAutoRefresh();
+      });
+
+      const keepAwakeCb = document.getElementById('keep-awake');
+      if (!('wakeLock' in navigator)) document.getElementById('keep-awake-label')?.style.setProperty('display','none');
+      keepAwakeCb?.addEventListener('change', () => keepAwakeCb.checked ? requestWakeLock() : releaseWakeLock());
+
+      // Buffer sync
+      const bufRange = document.getElementById('danger-buffer-range');
+      const bufNum   = document.getElementById('danger-buffer');
+      function syncBuf(val) {
+        const v = Math.max(0.5, Math.min(20, parseFloat(val) || 2.0));
+        if (bufRange) bufRange.value = v;
+        if (bufNum)   bufNum.value   = v;
+        return v;
+      }
+      function triggerUpdate(fit = false) {
+        const lat = parseFloat(document.getElementById('lat').value);
+        const lon = parseFloat(document.getElementById('lon').value);
+        if (lat && lon) fetchAndRenderWarning(lat, lon, { fitMap: fit });
+      }
+      bufRange?.addEventListener('input', () => {
+        syncBuf(bufRange.value);
+        clearTimeout(bufferUpdateTimer);
+        bufferUpdateTimer = setTimeout(() => triggerUpdate(true), 220);
+      });
+      bufRange?.addEventListener('change', () => { clearTimeout(bufferUpdateTimer); syncBuf(bufRange.value); triggerUpdate(true); });
+      bufNum?.addEventListener('change', () => { syncBuf(bufNum.value); triggerUpdate(true); });
+
+      document.getElementById('line-select')?.addEventListener('change', e => {
+        if (e.target.value) { window.currentSelectedLine = e.target.value; triggerUpdate(true); }
+      });
+
+      document.getElementById('btn-alarm-toggle')?.addEventListener('click', () => {
+        alarmEnabled = !alarmEnabled;
+        const btn = document.getElementById('btn-alarm-toggle');
+        if (!alarmEnabled) {
+          stopAlarm();
+          btn.style.background = '#475569';
+          btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" class="text-white"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>`;
+        } else {
+          btn.style.background = '#10b981';
+          btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" class="text-white"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`;
+        }
+      });
+
+      const mapExpandBtn = document.getElementById('btn-map-expand');
+      const mapEl = document.getElementById('map');
+      mapExpandBtn?.addEventListener('click', () => {
+        mapExpanded = !mapExpanded;
+        mapEl.style.height = mapExpanded ? '360px' : '160px';
+        mapExpandBtn.textContent = mapExpanded ? '縮小' : '放大';
+        setTimeout(() => map?.invalidateSize(), 60);
+      });
+    }
+
+    // ── Bootstrap ────────────────────────────────────────────────
+    async function bootstrap() {
+      initMap();
+      bindEvents();
+
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+      }
+
+      // Pre-unlock AudioContext on first user gesture so alarms triggered
+      // from async callbacks can play audio immediately on iOS/Safari.
+      function _unlockAudio() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+      }
+      document.addEventListener('touchstart', _unlockAudio, { once: true, passive: true });
+      document.addEventListener('click',      _unlockAudio, { once: true, passive: true });
+
+      requestLocation();
+
+      if (document.getElementById('auto-refresh')?.checked) startAutoRefresh();
+    }
+
+    window.onload = bootstrap;
+  </script>
+</body>
+</html>
